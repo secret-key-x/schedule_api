@@ -5,6 +5,8 @@ from typing import Optional, Dict, Any, Tuple
 
 @dataclass
 class LessonData:
+    group: str
+    day: str
     lesson_number: int
     time_str: str
     week_type: str
@@ -102,7 +104,7 @@ class ScheduleTextProcessor:
         cleaned = re.sub(r'\s+', ' ', cleaned)
         return cleaned.strip()
 
-    def parse_specific_lesson(self,raw_text, position, time_key):
+    def parse_specific_lesson(self,raw_text, position, time_key, day, group):
         """"Метод обробки пари специфічний"""
         lesson_num = self._extract_lesson_number(time_key)
         time_str = self._extract_time(time_key)
@@ -114,6 +116,8 @@ class ScheduleTextProcessor:
         week_type = week_type_map.get(position, position)
         if not raw_text or not raw_text.strip():
             lesson = LessonData(
+                group=group,
+                day=day,
                 lesson_number=lesson_num,
                 time_str=time_str,
                 week_type=week_type,
@@ -123,6 +127,8 @@ class ScheduleTextProcessor:
         raw_text = self._clear_pipes(raw_text)
         raw_text = self._clean_whitespace(raw_text)
         lesson = LessonData(
+            group=group,
+            day=day,
             lesson_number=lesson_num,
             time_str=time_str,
             week_type=week_type,
@@ -130,7 +136,7 @@ class ScheduleTextProcessor:
         )
         return asdict(lesson)
 
-    def parse_lesson(self, raw_text: str, position: str, time_key: str) -> Dict[str, Any]:
+    def parse_lesson(self, raw_text: str, position: str, time_key: str, day : str, group : str) -> Dict[str, Any]:
         """Головний метод розбору однієї пари"""
         lesson_num = self._extract_lesson_number(time_key)
         time_str = self._extract_time(time_key)
@@ -144,10 +150,13 @@ class ScheduleTextProcessor:
 
         if not raw_text or not raw_text.strip():
             lesson = LessonData(
+
                 lesson_number=lesson_num,
                 time_str=time_str,
                 week_type=week_type,
-                subject=""
+                subject="",
+                day=day,
+                group=group
             )
             return asdict(lesson)
 
@@ -166,7 +175,9 @@ class ScheduleTextProcessor:
             lesson_type=lesson_type,
             teacher_title=teacher_title,
             teacher_name=teacher_name,
-            room=room
+            room=room,
+            day=day,
+            group=group
         )
         return asdict(lesson)
 
@@ -184,6 +195,8 @@ class ScheduleTextProcessor:
                         pipe_count = self._count_pipes(raw_text)
                         if pipe_count < 2:
                             parsed = self.parse_specific_lesson(
+                                day=day,
+                                group=group,
                                 raw_text=raw_text,
                                 position=position,
                                 time_key=time_key
@@ -192,7 +205,9 @@ class ScheduleTextProcessor:
                             parsed = self.parse_lesson(
                                 raw_text=item.get("text", ""),
                                 position=item.get("position", "mono"),
-                                time_key=time_key
+                                time_key=time_key,
+                                day=day,
+                                group=group
                             )
                         processed_schedule[group][day].append(parsed)
         return processed_schedule
