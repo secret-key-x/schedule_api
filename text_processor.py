@@ -183,11 +183,9 @@ class ScheduleTextProcessor:
 
     def process_schedule(self, full_schedule: Dict[str, Any]) -> Dict[str, Any]:
         """Обходить весь словник розкладу та обробляє всі пари"""
-        processed_schedule = {}
+        processed_schedule = []
         for group, days in full_schedule.items():
-            processed_schedule[group] = {}
             for day, times in days.items():
-                processed_schedule[group][day] = []
                 for time_key, lessons in times.items():    
                     for item in lessons:
                         raw_text = item.get("text", "")
@@ -209,5 +207,5 @@ class ScheduleTextProcessor:
                                 day=day,
                                 group=group
                             )
-                        processed_schedule[group][day].append(parsed)
+                        processed_schedule.append(parsed)
         return processed_schedule
