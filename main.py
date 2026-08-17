@@ -27,7 +27,7 @@ async def parse_schedule(file: UploadFile = File(None), url: str = Form(None)):
                 buffer.write(content)
                 
         elif url:
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(follow_redirects=True) as client:
                 response = await client.get(url)
                 response.raise_for_status()
                 with open(temp_file_path, "wb") as buffer:
