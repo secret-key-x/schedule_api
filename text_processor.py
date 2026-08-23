@@ -75,7 +75,7 @@ class ScheduleTextProcessor:
 
     def _extract_teacher_title(self, text: str) -> Tuple[Optional[str], str]:
         """Шукає звання викладача"""
-        titles = [r'\bдоц\b\.?', r'\bпроф\b\.?', r'\bст\.вик\b\.?']
+        titles = [r'\bдоц\b\.?', r'\bпроф\b\.?', r'\bст\.вик\b\.?', r'\bас\b\.?', r'\bасист\b\.?']
         found_titles = []
         clean_text = text
         for pattern in titles:
