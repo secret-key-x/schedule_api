@@ -36,10 +36,6 @@ class PDFGeometricTableParser:
                 self.lines["horizontal"].append({"y": l['top'], "x0": min(l['x0'], l['x1']), "x1": max(l['x0'], l['x1'])})
 
     def _heal_table_grid(self, gap_tolerance=8.0):
-        """
-        Акуратне лікування сітки: фіксує лише головні стовпи (межі таблиці, День, Пара).
-        Горизонталі дотягує тільки на дрібні мікро-розриви.
-        """
         if not self.lines["horizontal"] or not self.lines["vertical"]:
             return
 
@@ -49,18 +45,12 @@ class PDFGeometricTableParser:
         vertical_xs = sorted(list(set(round(v["x"], 1) for v in self.lines["vertical"])))
         if not vertical_xs: return
         
-        # Знаходимо "критичні" стовпи: 
-        # 0: Лівий край
-        # 1: Між Днем і Часом
-        # 2: Між Часом і розкладом
-        # -1: Правий край
         critical_xs = []
         if len(vertical_xs) > 0: critical_xs.append(vertical_xs[0])
         if len(vertical_xs) > 1: critical_xs.append(vertical_xs[1])
         if len(vertical_xs) > 2: critical_xs.append(vertical_xs[2])
         if len(vertical_xs) > 3: critical_xs.append(vertical_xs[-1])
 
-        # Розтягуємо ТІЛЬКИ критичні вертикалі, інші не чіпаємо, щоб не розрізати пари
         for v in self.lines["vertical"]:
             if any(abs(v["x"] - cx) < 3.0 for cx in critical_xs):
                 v["top"] = min_y
@@ -68,7 +58,6 @@ class PDFGeometricTableParser:
 
         min_x, max_x = vertical_xs[0], vertical_xs[-1]
 
-        # Легке примагнічування горизонталей до будь-яких найближчих вертикалей
         for h in self.lines["horizontal"]:
             for vx in vertical_xs:
                 if 0 < (h["x0"] - vx) <= gap_tolerance:
@@ -79,7 +68,6 @@ class PDFGeometricTableParser:
                     h["x1"] = vx
                     break
             
-            # Прибиваємо до країв, якщо трішки не вистачає
             if h["x0"] - min_x < gap_tolerance: h["x0"] = min_x
             if max_x - h["x1"] < gap_tolerance: h["x1"] = max_x
 
@@ -108,7 +96,7 @@ class PDFGeometricTableParser:
         return False
 
     def _generate_minimal_cells(self):
-        self.cells = []
+        raw_cells = []
         for x1, y1 in self.intersections:
             rights = [p for p in self.intersections if abs(p[1] - y1) < 1.2 and p[0] > x1]
             belows = [p for p in self.intersections if abs(p[0] - x1) < 1.2 and p[1] > y1]
@@ -126,11 +114,23 @@ class PDFGeometricTableParser:
 
                     has_internal_nodes = any(x1 < p[0] < x2 and y1 < p[1] < y2 for p in self.intersections)
                     if not has_internal_nodes:
-                        bbox = (x1, y1, x2, y2)
-                        if bbox not in self.cells: self.cells.append(bbox)
+                        bbox = (round(x1, 1), round(y1, 1), round(x2, 1), round(y2, 1))
+                        if bbox not in raw_cells: 
+                            raw_cells.append(bbox)
                         cell_found = True
                         break
                 if cell_found: break
+
+        # 🚫 ВБИВАЄМО МІКРО-ПРЯМОКУТНИКИ (від подвійних ліній)
+        self.cells = []
+        for bbox in raw_cells:
+            w = bbox[2] - bbox[0]
+            h = bbox[3] - bbox[1]
+            # Якщо висота комірки менша за 8 пікселів або ширина менша за 15 — це графічне сміття
+            if w >= 15.0 and h >= 8.0:
+                self.cells.append(bbox)
+
+        if not self.cells: return
 
         x_set = set([round(bbox[0], -1) for bbox in self.cells])
         self.columns_x = sorted(list(x_set))
@@ -141,9 +141,6 @@ class PDFGeometricTableParser:
         cropped = page.crop(bbox, strict=False)
         raw_chars = [c for c in cropped.chars if c['width'] > 0 and c['height'] > 2]
         
-        # ---------------------------------------------------------
-        # МАГІЧНИЙ ФІЛЬТР 2.0: БЕРЕМО НАЙВИЩИЙ ШАР (ОСТАННІЙ ЕЛЕМЕНТ)
-        # ---------------------------------------------------------
         chars = []
         for c in raw_chars:
             color = c.get('non_stroking_color')
@@ -159,14 +156,12 @@ class PDFGeometricTableParser:
                 if char_area > 0:
                     overlap_ratio = (x_overlap * y_overlap) / char_area
                     if overlap_ratio > 0.4:
-                        # Якщо накладка, ЗАМІНЮЄМО стару літеру новою, бо вона лежить "поверх"
                         chars[i] = c 
                         is_colliding = True
                         break
                         
             if not is_colliding:
                 chars.append(c)
-        # ---------------------------------------------------------
 
         if not chars: return ""
 
@@ -271,10 +266,7 @@ class PDFGeometricTableParser:
             page = pdf.pages[page_index]
             
             self._extract_and_normalize_lines(page)
-            
-            # 👇 Оновлений хірург працює тут 👇
             self._heal_table_grid()
-            
             self._find_intersections()
             self._generate_minimal_cells()
 
@@ -413,6 +405,25 @@ class PDFGeometricTableParser:
                     "text": cell["text"]
                 })
 
+        for grp_name in schedule_json:
+            for day in schedule_json[grp_name]:
+                for time, classes in schedule_json[grp_name][day].items():
+                    unique_classes = []
+                    seen = set()
+                    
+                    has_real_text = any(c["text"].strip() != "" for c in classes)
+
+                    for c in classes:
+                        if has_real_text and c["text"].strip() == "":
+                            continue
+                            
+                        identifier = (c["position"], c["text"])
+                        if identifier not in seen:
+                            seen.add(identifier)
+                            unique_classes.append(c)
+                            
+                    schedule_json[grp_name][day][time] = unique_classes
+
         if output_path:
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(schedule_json, f, ensure_ascii=False, indent=4)
@@ -440,7 +451,6 @@ class PDFGeometricTableParser:
 # --- ТЕСТОВИЙ БЛОК ---
 if __name__ == "__main__":
     
-    # Не забудь поміняти на потрібний файл, якщо тестуєш "1_kurs_v0.3.pdf"!
     parser = PDFGeometricTableParser(r"1_kurs_v0.3.pdf", text_gap_threshold=5.0) 
 
     print("⏳ Розпізнавання геометричної таблиці...")
@@ -450,17 +460,4 @@ if __name__ == "__main__":
     parser.visualize_debug(page_index=0, output_image_path="debug_vision.png")
 
     print("\n--- Експорт Розкладу в JSON ---")
-    schedule_data = parser.export_schedule_to_json("output_schedule.json") 
-
-    if schedule_data:
-        groups_to_show = list(schedule_data.keys())[:2]
-        for group in groups_to_show:
-            print(f"\n🎓 Розклад для групи: {group}")
-            for day, times in schedule_data[group].items():
-                print(f"  📅 {day}")
-                for time, classes in times.items():
-                    print(f"    ⏰ Пара {time}:")
-                    for c in classes:
-                        pos_icon = "[█] Mono" if c['position'] == 'mono' else ("[▲] Top " if c['position'] == 'top' else "[▼] Bottom")
-                        text_display = c['text'] if c['text'].strip() else "(Пуста пара/вікно)"
-                        print(f"       {pos_icon} -> {text_display}")
+    schedule_data = parser.export_schedule_to_json("output_schedule.json")
