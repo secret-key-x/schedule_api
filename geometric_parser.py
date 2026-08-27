@@ -121,12 +121,10 @@ class PDFGeometricTableParser:
                         break
                 if cell_found: break
 
-        # 🚫 ВБИВАЄМО МІКРО-ПРЯМОКУТНИКИ (від подвійних ліній)
         self.cells = []
         for bbox in raw_cells:
             w = bbox[2] - bbox[0]
             h = bbox[3] - bbox[1]
-            # Якщо висота комірки менша за 8 пікселів або ширина менша за 15 — це графічне сміття
             if w >= 15.0 and h >= 8.0:
                 self.cells.append(bbox)
 
@@ -260,19 +258,42 @@ class PDFGeometricTableParser:
         if bottom_text: res.append(bottom_text)
         return "\n".join(res)
 
-    def parse_table_geometric(self, page_index: int = 0) -> dict:
+    def parse_table_geometric(self, pages: list = None) -> dict:
         self.rect_text_dict = {}
-        with pdfplumber.open(self.pdf_path) as pdf:
-            page = pdf.pages[page_index]
-            
-            self._extract_and_normalize_lines(page)
-            self._heal_table_grid()
-            self._find_intersections()
-            self._generate_minimal_cells()
+        y_offset = 0.0
+        master_columns_x = []
 
-            for coords in self.cells:
-                text = self._extract_custom_text(page, coords)
-                self.rect_text_dict[coords] = text if text else ""
+        with pdfplumber.open(self.pdf_path) as pdf:
+            pages_to_process = pages if pages is not None else range(len(pdf.pages))
+            
+            for page_index in pages_to_process:
+                page = pdf.pages[page_index]
+                
+                self.lines = {"horizontal": [], "vertical": []}
+                self.intersections = []
+                self.cells = []
+                
+                self._extract_and_normalize_lines(page)
+                self._heal_table_grid()
+                self._find_intersections()
+                self._generate_minimal_cells()
+
+                if not master_columns_x and hasattr(self, 'columns_x') and self.columns_x:
+                    master_columns_x = self.columns_x
+
+                for coords in self.cells:
+                    text = self._extract_custom_text(page, coords)
+                    x0, y0, x1, y1 = coords
+                    
+                    # Зсуваємо координати по Y для наступних сторінок
+                    shifted_coords = (x0, y0 + y_offset, x1, y1 + y_offset)
+                    self.rect_text_dict[shifted_coords] = text if text else ""
+                
+                y_offset += float(page.height)
+
+        if master_columns_x:
+            self.columns_x = master_columns_x
+            
         return self.rect_text_dict
 
     def export_schedule_to_json(self, output_path: str = None) -> dict:
@@ -367,7 +388,8 @@ class PDFGeometricTableParser:
             matched_day = "Невідомий день"
             for i, d in enumerate(days_cells):
                 d_y0 = d["bbox"][1]
-                d_y1 = days_cells[i+1]["bbox"][1] if i + 1 < len(days_cells) else 9999
+                # Збільшено ліміт, щоб охопити склеєні сторінки
+                d_y1 = days_cells[i+1]["bbox"][1] if i + 1 < len(days_cells) else 9999999
                 if d_y0 - 5 <= cy_center < d_y1 + 5:
                     matched_day = d["text"]
                     break
@@ -432,32 +454,41 @@ class PDFGeometricTableParser:
         return schedule_json
     
     def visualize_debug(self, page_index: int = 0, output_image_path: str = "debug_vision.png"):
-        if not self.cells and not self.intersections:
-            print("⚠️ Немає даних для візуалізації. Спочатку запустіть parse_table_geometric()!")
-            return
-
         with pdfplumber.open(self.pdf_path) as pdf:
+            if page_index >= len(pdf.pages):
+                print(f"⚠️ Сторінки {page_index} не існує.")
+                return
+                
             page = pdf.pages[page_index]
-            im = page.to_image(resolution=150)
             
+            self.lines = {"horizontal": [], "vertical": []}
+            self.intersections = []
+            self.cells = []
+            self._extract_and_normalize_lines(page)
+            self._heal_table_grid()
+            self._find_intersections()
+            self._generate_minimal_cells()
+            
+            im = page.to_image(resolution=150)
             if self.cells:
                 im.draw_rects(self.cells, stroke="red", stroke_width=2, fill=None)
             if self.intersections:
                 im.draw_circles(self.intersections, radius=3, stroke="green", fill="green")
                 
             im.save(output_image_path)
-            print(f"👁️ Рентген-візуалізацію парсера збережено у файл: {output_image_path}")
+            print(f"👁️ Рентген-візуалізацію сторінки {page_index + 1} збережено у файл: {output_image_path}")
 
 # --- ТЕСТОВИЙ БЛОК ---
 if __name__ == "__main__":
     
     parser = PDFGeometricTableParser(r"1_kurs_v0.3.pdf", text_gap_threshold=5.0) 
 
-    print("⏳ Розпізнавання геометричної таблиці...")
-    parsed_cells = parser.parse_table_geometric(page_index=0) 
+    print("⏳ Розпізнавання геометричної таблиці на всіх сторінках...")
+    parsed_cells = parser.parse_table_geometric() # Парсить весь документ автоматично
 
-    print("📸 Створення візуалізації...")
-    parser.visualize_debug(page_index=0, output_image_path="debug_vision.png")
+    print("📸 Створення візуалізацій для перевірки...")
+    parser.visualize_debug(page_index=0, output_image_path="debug_vision_page1.png")
+    parser.visualize_debug(page_index=1, output_image_path="debug_vision_page2.png")
 
     print("\n--- Експорт Розкладу в JSON ---")
     schedule_data = parser.export_schedule_to_json("output_schedule.json")
