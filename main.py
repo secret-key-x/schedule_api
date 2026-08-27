@@ -34,6 +34,7 @@ async def parse_schedule(file: UploadFile = File(None), url: str = Form(None)):
                     buffer.write(response.content)
 
         parser = PDFGeometricTableParser(rf"{temp_file_path}", text_gap_threshold=5.0)
+
         parser.parse_table_geometric()
         schedule_data = parser.export_schedule_to_json()
 
