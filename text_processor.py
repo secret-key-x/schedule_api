@@ -186,7 +186,6 @@ class ScheduleTextProcessor:
         processed_schedule = []
         for group, days in full_schedule.items():
             for day, times in days.items():
-                print(day)
                 for time_key, lessons in times.items():    
                     for item in lessons:
                         raw_text = item.get("text", "")
